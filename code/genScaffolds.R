@@ -1,0 +1,266 @@
+# to generate "scaffolds" for each passage which contain information we'll care
+# about for preprocessing
+
+# Luc Sahar -- NDCLab, Florida International University
+# last updated 2024-03-06
+
+library(purrr) # map, map_df; generally good to have
+library(dplyr)
+library(readxl)
+library(janitor) # allow us to programmatically make R-friendly naming
+                 # conventions from "dirty" Excel data without ever touching
+                 # anything by hand
+library(tidyr) # fill
+
+# setwd("your/path/to/this/repo/../read-study1-analysis")
+# We need a directory with the gold standard for each of these passages:
+path_to_read_dataset <- "../read-study1-dataset"
+path_to_error_coding_excels <- paste(path_to_read_dataset,
+                                    "materials/task1/stimuli/error-text-excels",
+                                     sep = '/')
+# this makes one assumption, namely that the `read-study1-dataset` and
+# `read-study1-analysis` repos are located in the same parent folder
+
+fs::dir_exists(path_to_error_coding_excels)
+
+
+stimuli_categories_from_subfolders <- function(dir_path) {
+  # Given, say, three kinds of stimuli, denoted thanks to folder naming
+  # conventions as dir_path/X, dir_path/Y, and dir_path/Z, give me the three
+  # categories of stimuli: i.e. X, Y, and Z
+  dir_path %>%
+    fs::dir_ls(type = "directory") %>%
+    map_vec(basename) %>%
+    as.vector()
+}
+
+# Now, we want to compute characteristics
+# This is static; we only need one instance of each passage for each grade level
+# This won't change from, for example, participant XXXX01's "boots_11g" to
+# participant XXXX02's "boots_11g"
+
+# in effect, we have 4 groups:
+# 9a, 9b, 11a, 11b
+
+# get our categories of passages programmatically based on subfolders
+stimuli_categories <-
+  stimuli_categories_from_subfolders(path_to_error_coding_excels)
+
+exemplar_excel_path <- path_to_error_coding_excels %>% # proof of concept: we CAN get it w/o hard coding
+  paste(stimuli_categories[1], sep = '/') %>%
+  fs::dir_ls() %>%
+  last
+
+exemplar_excel_df <- read_xlsx(exemplar_excel_path)
+
+
+# group our stimuli by category
+
+
+
+# first df: fine-grained
+# passage | category |  word_id | syllable_id | word | syllable | wordfreq
+sanitize <- function(word) { # strip unwanted characters and downcase, but leave inflected
+  unwanted="[,.;!?\"')(]"
+  word %>%
+    str_remove_all(unwanted) %>%
+    tolower()
+  # e.g.
+  # test_scaffold %>% slice(1:50) %>% pull(word) %>% map_vec(sanitize)
+}
+
+check_value_by_col_index <- function(df, col_index, value) {
+  mutate(df, status = df[[col_index]] == value)
+}
+
+drop_non_numeric_rows <- function(df) { # if, for a given row, a df's second column has non-0 data, drop that row
+  df %>%
+    check_value_by_col_index(2, 0) %>% # are the second col values 0?
+    filter(status == TRUE) # only rows whose second column value is 0
+# The second col having values of 0 means that the first col is filled with
+# error types that are numeric (e.g. misproduction, hesitation, interference,
+# etc. rather than "actual correction produced" etc.)
+}
+
+# get idiomatic error types from row names
+get_idiomatic_annotation_names <- function(passage_excel_df) {
+  passage_excel_df %>%
+    drop_non_numeric_rows() %>%
+    pull(1) %>% # get first col i.e. labels -- irrespective of its name
+    map_vec(make_clean_names)
+}
+
+annotation_type_names <- get_idiomatic_annotation_names(exemplar_excel_df)
+
+read_error_data_from_path <- function(passage_path) {
+  df <- # get the first row (syllable) plus all our numeric data
+    passage_path %>%
+    read_xlsx() %>%
+    slice(0:length(annotation_type_names) + 1) %>%
+    data.frame(row.names = append("syllable", annotation_type_names)) %>%
+    t
+  return(df[-1,] %>% # ignore the original titles
+           as.data.frame) # and convert back to a dataframe
+}
+
+
+test_data_from_excel <- read_error_data_from_path(exemplar_excel_path)
+
+
+build_scaffold_from_rownames <- function(blank_coding_excel, passage_name, category) # from the output of `read_error_data_from_path`
+{ # this is a first step, a helper
+  labels <- rownames(blank_coding_excel)
+  is_word_onset <- map_vec(labels, \(item) !startsWith(item, "..."))
+  syllables <- blank_coding_excel$syllable
+
+  return(data.frame
+         (     passage     = fs::path_ext_remove(passage_name), # trucks_11g.xlsx -> trucks_11g
+               category    = category,
+               raw_word    = labels,
+               word        = "todo",
+               syllable    = syllables,
+               wordOnset   = is_word_onset,
+               word_id     = "todo",
+               syllable_id = "todo",
+               wordFreq    = "TODO"))
+}
+
+
+test_scaffold_from_excel <-
+  build_scaffold_from_rownames(
+    blank_coding_excel = test_data_from_excel,
+    passage_name = basename(exemplar_excel_path),
+    category     = stimuli_categories[1])
+
+
+build_scaffold <- function(passage_name, category, blank_coding_excel) # from the output of `read_error_data_from_path`
+{ # end user use
+  # word_id is effectively the number of times thus far wordOnset has been TRUE
+  # syllable_id is always previous syllable_id++
+  blank_coding_excel %>%
+    build_scaffold_from_rownames(passage_name, category) %>%
+    mutate(word = ifelse(wordOnset, raw_word, NA)) %>%
+    tidyr::fill(word) %>% # first, for multisyll words, use prev onset's word
+    mutate(word        = if_else(grepl("\\d", word), syllable, word), # then revert extras
+           word_clean  = sanitize(word),
+           syllable_id = paste(passage, "syllable", row_number(), sep = "_"), # one syllable increment no matter what
+           word_id     = paste(passage, "word", cumsum(as.integer(wordOnset)), sep = "_")) # how many times has "onset" changed?
+}
+
+test_scaffold <- build_scaffold(
+  blank_coding_excel = test_data_from_excel,
+  passage_name = basename(exemplar_excel_path),
+  category     = stimuli_categories[1])
+
+create_scaffolds_for_one_stimulus_category <- function(category, dir_path) {
+  # path is to ONE category
+  # category <- basename(dir_path)
+  xlsx_files <- dir_path %>% fs::dir_ls()
+
+
+  # blank_coding_excels <- map(xlsx_files, read_error_data_from_path)
+  map(
+    xlsx_files %>% set_names(map(xlsx_files, # label them "trucks_11g", etc. useful later
+                                 compose(fs::path_ext_remove, basename))),
+
+    \(xlsx_file){
+      build_scaffold(
+        passage_name = basename(xlsx_file),
+        category = category,
+        blank_coding_excel = read_error_data_from_path(xlsx_file)
+      )
+    }
+  )
+
+}
+
+exemplar_category_scaffolds <- # a list of scaffold dfs
+  create_scaffolds_for_one_stimulus_category(
+    category = stimuli_categories[1],
+    dir_path = paste(path_to_error_coding_excels,
+                     stimuli_categories[1],
+                     sep = '/')
+)
+
+create_scaffolds_by_stimulus_category <- function(dir_path) {
+  categories <- stimuli_categories_from_subfolders(dir_path) %>% set_names()
+
+  map(categories,
+      \(category) {
+        category_path <- paste(dir_path, category, sep = '/')
+        create_scaffolds_for_one_stimulus_category(category,
+                                                   category_path)
+      }
+  )
+  # returns a list (all categories) of lists (each category) of dataframes (each passage in that category)
+}
+
+exemplar_all_categories_scaffolds <- # lists of scaffold dfs, by category
+  create_scaffolds_by_stimulus_category(path_to_error_coding_excels)
+
+
+
+save_scaffolds_by_category_to_disk <- function(scaffolds_by_category) {
+  "todo"
+}
+
+# library(openxlsx)
+#
+# dataset_names <- list('Sheet1' = df1, 'Sheet2' = df2, 'Sheet3' = df3)
+# write.xlsx(dataset_names, file = 'mydata.xlsx')
+# now our data is named with sheets!
+
+
+
+# the following are to come in preproc or prep:
+# second df: metadata (passage level traits)
+# title      | boots
+# category   | 9a
+# text       | Boots, with their rich history and diverse design variations ...
+# word count | 207
+# average frequency | 1.8957
+# ^ this df is kind of a maybe, but seems like it may be useful
+# it would be one row per passage
+
+
+
+# For every passage, what is its text?
+
+# And, for each text, what is each word's frequency?
+
+# For each passage, what is its average frequency?
+
+# For each passage, how many words does it have?
+
+# For each passage, what is its Flesch-Kincaid reading score?
+
+
+
+
+
+
+# into_dict <- function(sequence, f, env = new.env()) {
+#   map(sequence, \(x) env[[x]] = f(x)) # fill a dictionary that maps x -> f(x)
+#   return(env)
+# }
+#
+
+
+
+# word1     | syllable1
+# word2     | syllable2
+# word3     | syllable3
+# word4     | syllable4
+# word5     | syllable5, syllable6, syllable7
+# word6     | syllable8
+# word8     | syllable9, syllable10
+# word1freq | 1.58
+# word2freq | 6.3
+# word3freq | 6.5
+# word4freq | 4.17
+# word5freq | 3.77
+# word6freq | 7.4
+# word7freq | 3.56
+# word8freq | 4.12
+
+
