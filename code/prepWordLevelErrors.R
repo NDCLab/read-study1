@@ -51,8 +51,24 @@ counterbalance_data <-
   counterbalance_info %>%
   mutate(alone_first = substr(task_cb, start = 2, stop = 2) == "2",
          flanker_first = substr(task_cb, start = 1, stop = 1) == "A",
-         set_a_first = list_cb == "X") %>%
+         set_a_first = list_cb == "X",
+         set_a_alone = alone_first == set_a_first) %>%
   select(-task_cb, -list_cb)
+
+# grand total
+error_rates <- preprocessed_data %>%
+  summarize(across(misproduced_syllable:correction,
+                   \(x) mean(x, na.rm = TRUE),
+                   .names = "{.col}_rate")) %>%
+  select(ends_with("_rate"))
+
+# "", sd
+preprocessed_data %>%
+  summarize(across(misproduced_syllable:correction,
+                   \(x) sd(x, na.rm = TRUE),
+                   .names = "{.col}_rate")) %>%
+  select(ends_with("_rate"))
+
 
 # rates of each error type for each person
 rates_by_participant <- preprocessed_data %>%
@@ -83,13 +99,31 @@ rates_by_passage %>%
                    .names = "{.col}_sd"))
 
 
+# join participant error data and counterbalance data
+preprocessed_data_by_condition <- preprocessed_data %>%
+  left_join(counterbalance_data, by = "participant_id") %>%
+  mutate(
+    which_passage_set = str_sub(category, -1, -1), # "a" or "b"
+    alone =
+      (which_passage_set == "a" &  set_a_alone) |
+      (which_passage_set == "b" & !set_a_alone),
+    social = !alone
+  ) %>% select(colnames(preprocessed_data), social)
 
 
-# compare
-data.frame(psg_sd = rates_by_passage %>%
-             summarize(across(ends_with("_rate"),
-                              \(x) sd(x, na.rm = TRUE))) %>% unlist,
-           participant_sd = rates_by_participant %>%
-             summarize(across(ends_with("_rate"),
-                              \(x) sd(x, na.rm = TRUE))) %>% unlist)
+
+# rates of each error type for each person
+rates_by_condition <- preprocessed_data_by_condition %>%
+  group_by(social) %>%
+  summarize(across(misproduced_syllable:correction,
+                   \(x) length(which(x)) / n(),
+                   .names = "{.col}_rate")) %>%
+  select(social, ends_with("_rate"))
+
+# "", sd
+preprocessed_data_by_condition %>% # nb not working as intended: NAs still here
+  group_by(social) %>%
+  summarize(across(misproduced_syllable:correction,
+                   \(x) sd(length(which(x)) / n(), na.rm = TRUE),
+                   .names = "{.col}_sd"))
 
