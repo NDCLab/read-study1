@@ -112,7 +112,7 @@ preprocessed_data_by_condition <- preprocessed_data %>%
 
 
 
-# rates of each error type for each person
+# rates of each error type by condition
 rates_by_condition <- preprocessed_data_by_condition %>%
   group_by(social) %>%
   summarize(across(misproduced_syllable:correction,
@@ -127,3 +127,29 @@ preprocessed_data_by_condition %>% # nb not working as intended: NAs still here
                    \(x) sd(length(which(x)) / n(), na.rm = TRUE),
                    .names = "{.col}_sd"))
 
+rates_by_participant_and_condition <- preprocessed_data_by_condition %>%
+  group_by(participant_id, social) %>%
+  summarize(across(misproduced_syllable:correction,
+                   \(x) length(which(x)) / n(),
+                   .names = "{.col}_rate")) %>%
+  select(social, participant_id, ends_with("_rate"))
+
+# sd
+# rates_by_participant_and_condition %>%
+#   summarize(across(ends_with("_rate"),
+#                    \(x) sd(x, na.rm = TRUE),
+#                    .names = "{.col}_sd"))
+
+rates_by_passage_and_condition <- preprocessed_data_by_condition %>%
+  group_by(passage, social) %>%
+  summarize(across(misproduced_syllable:correction,
+                   \(x) length(which(x)) / n(),
+                   .names = "{.col}_rate")) %>%
+  select(social, passage, ends_with("_rate"))
+
+
+# sd
+# rates_by_passage_and_condition %>%
+#   summarize(across(ends_with("_rate"),
+#                    \(x) sd(x, na.rm = TRUE),
+#                    .names = "{.col}_sd"))
