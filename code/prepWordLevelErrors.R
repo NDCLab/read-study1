@@ -155,8 +155,20 @@ preprocessed_data %>%
   )
 view_last_if()
 
-compute_statistics_longer <- function(df) {
+pivot_mean_and_sd_longer <- function(df, .to_percent = TRUE) {
+  result <-
+    df %>%
+    pivot_longer(
+      names_to = c("error_type", ".value"),
+      names_pattern = "(.*)_(sd|rate)",
+      cols = c(ends_with("_sd"), ends_with("_rate"))
+    )
 
+  if (.to_percent) {
+    mutate(result, rate = sprintf("%s%%", round(rate * 100, digits = 2)))
+  } else {
+    result
+  }
 }
 
 # preprocessed_data %>%
@@ -185,6 +197,23 @@ compute_statistics_longer <- function(df) {
 #                    .names = "{.col}_rate")) %>%
 #   select(ends_with("_rate"))
 
+long_data_by_passage <-
+  preprocessed_data %>%
+  reframe(
+    across(misproduction:correction, mean_and_sd, .unpack = TRUE),
+    .by = passage
+  ) %>% pivot_mean_and_sd_longer()
+
+long_data_by_participant <- # does sd mean anything meaningful here??
+  preprocessed_data %>%
+  reframe(
+    across(misproduction:correction, mean_and_sd, .unpack = TRUE),
+    .by = participant_id
+  ) %>% pivot_mean_and_sd_longer()
+
+print("Example: how many hesitations were made for each 11th grade passage?")
+long_data_by_passage %>% filter(error_type == 'hesitation' & str_detect(passage, "11"))
+
 
 # rates of each error type for each person
 rates_by_participant <- preprocessed_data %>%
@@ -207,11 +236,8 @@ preprocessed_data %>%
     across(misproduction:correction, mean_and_sd, .unpack = TRUE),
     .by = participant_id
   ) %>%
-  pivot_longer(
-    names_to = c(".value", "error_type"),
-    names_pattern = "(.*)_(sd|rate)",
-    cols = c(ends_with("_sd"), ends_with("_rate"))
-  )
+  pivot_mean_and_sd_longer(.to_percent = TRUE) %>%
+  select(-sd)
 view_last_if()
 
 # "", sd
