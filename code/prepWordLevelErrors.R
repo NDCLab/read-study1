@@ -5,7 +5,7 @@
 # Report on READ study 1 data by error type as a function of participant,
 # passage, and condition.
 
-# last updated 03/19/2024
+# last updated 03/21/2024
 
 library(glue)
 library(dplyr)
@@ -69,48 +69,6 @@ counterbalance_info <- data.frame(
               "Y")
 )
 
-apply_fn_to_cols_if_present <- function(df, fn, ...) {
-  colstrings <- enquos(...)
-  col_vec <- map_vec(colstrings, as_label)
-  df %>% mutate(across(any_of(col_vec), fn))
-}
-
-convert_cols_to_string_if_present <- function(df, ...) {
-  apply_fn_to_cols_if_present(df, as.character, ...)
-}
-
-create_dummy_name <- function(df, .start = "_") {
-# Find the first dummy column name that won't overwrite our data
-  if (!(.start %in% colnames(df))) {
-    .start
-  } else {
-    create_dummy_name(df, .start = paste('_', .start, sep = ''))
-  }
-}
-
-error_rates_as_percents <- function(df) { # -> human readable output at a glance
-  dummy <- create_dummy_name(df)
-  df %>%
-    ungroup %>%
-    apply_fn_to_cols_if_present(as.character, participant_id) %>% # don't want id as %
-    mutate({{dummy}} := NA, .before = 1) %>%
-    adorn_pct_formatting %>%
-    select(-{{dummy}}) %>%
-    apply_fn_to_cols_if_present(as.double, participant_id)
-  # adorn_pct_formatting will automatically ignore the first column, which we
-  # don't necessarily want it to do. There is no way to override this except to
-  # explicitly name which columns to turn into percents--exactly what we DON'T
-  # want here; we want something general s.t. we can pass any df we end up
-  # creating later to this function and it will "just work". Therefore we create
-  # a dummy column, for adorn_pct_formatting to ignore as it wants to, then drop
-
-}
-
-# rates_by_participant_and_condition %>%
-#   ungroup %>%
-#   mutate(across(participant_id, as.character)) %>%
-#   adorn_pct_formatting()
-
 view_if <- function(df) { if (VIEW_MODE) View(df) }
 view_last <- function() { View(.Last.value) }
 view_last_if <- function() { view_if(.Last.value) }
@@ -125,25 +83,11 @@ counterbalance_data <-
   select(-task_cb, -list_cb)
 
 # VIEW_MODE=TRUE
+# VIEW_MODE=FALSE
 view_if(counterbalance_data)
 
-# grand total
-error_rates <- preprocessed_data %>%
-  summarize(across(misproduction:correction,
-                   \(x) mean(x, na.rm = TRUE),
-                   .names = "{.col}_rate")) %>%
-  select(ends_with("_rate")) %>%
-  error_rates_as_percents
+# first, grand total
 
-
-view_if(error_rates)
-
-mean_and_sd <- function(x) {
-# this is fundamentally flawed: it's not how standard deviations should be used
-# .........right??
-  data.frame(rate = mean(x, na.rm = TRUE),
-             sd   = sd(x, na.rm = TRUE))
-}
 
 # BINGO
 
@@ -151,21 +95,21 @@ percentize <- function(rate) {
   sprintf("%s%%", round(rate * 100, digits = 2))
 }
 
-pivot_mean_and_sd_longer <- function(df, .to_percent = TRUE) {
-  result <-
-    df %>%
-    pivot_longer(
-      names_to = c("error_type", ".value"),
-      names_pattern = "(.*)_(sd|rate)",
-      cols = c(ends_with("_sd"), ends_with("_rate"))
-    )
-
-  if (.to_percent) {
-    mutate(result, rate = sprintf("%s%%", round(rate * 100, digits = 2)))
-  } else {
-    result
-  }
-}
+# pivot_mean_and_sd_longer <- function(df, .to_percent = TRUE) {
+#   result <-
+#     df %>%
+#     pivot_longer(
+#       names_to = c("error_type", ".value"),
+#       names_pattern = "(.*)_(sd|rate)",
+#       cols = c(ends_with("_sd"), ends_with("_rate"))
+#     )
+#
+#   if (.to_percent) {
+#     mutate(result, rate = sprintf("%s%%", round(rate * 100, digits = 2)))
+#   } else {
+#     result
+#   }
+# }
 
 rates_long <-
   preprocessed_data %>%
@@ -175,6 +119,7 @@ rates_long <-
   pivot_longer(names_to = "error_type",
                values_to = "rate_of_error_type",
                cols = everything())
+# but how do we do this with a grouping variable?
 
 # as percents:
 rates_long_with_percents <-
@@ -212,56 +157,19 @@ append_sd_as_last_row <- function(df, cols_to_sd, id_col = NULL) {
   add_row(df, sd_row)
 }
 
-preprocessed_data %>%
-  reframe(
-    across(misproduction:correction, mean_and_sd, .unpack = TRUE)
-  ) %>%
-  pivot_longer(
-    names_to = c("error_type", ".value"),
-    names_pattern = "(.*)_(sd|rate)",
-    cols = c(ends_with("_sd"), ends_with("_rate"))
-  )
-view_last_if()
-
-
-rates_long %>%
-  mutate(rate_as_percent = percentize(rate_of_error_type)) %>%
+rates_long_with_percents %>%
   append_sd_as_last_row(rate_of_error_type)
 
-
-# preprocessed_data %>%
-#   reframe(across(misproduction:correction,
-#                  rate = \(col) mean(col, na.rm = TRUE),
-#                  sd   = \(col) sd(col, na.rm = TRUE))) %>%
-#   pivot_longer(cols = misproduction:correction,
-#                names_to = "error_type",
-#                values_to = "rate_of_occurrence") %>%
-#   mutate()
-# preprocessed_data %>%
-#   reframe(across(misproduction:correction,
-#                  mean_and_sd,
-#                  .unpack = TRUE,
-#                  )) %>%
-#   pivot_longer(cols = misproduction:correction,
-#                names_to = "error_type",
-#                values_to = "rate_of_occurrence") %>%
-#   mutate()
-
-
-# "", sd
-# preprocessed_data %>%
-#   summarize(across(misproduction:correction,
-#                    \(x) sd(x, na.rm = TRUE),
-#                    .names = "{.col}_rate")) %>%
-#   select(ends_with("_rate"))
-long_data <-
-  preprocessed_data %>%
-  reframe(
-    across(misproduction:correction, mean_and_sd, .unpack = TRUE)
-  ) %>%
-  pivot_mean_and_sd_longer()
+# todo rewrite w/o sd as column
+# long_data <-
+#   preprocessed_data %>%
+#   reframe(
+#     across(misproduction:correction, mean_and_sd, .unpack = TRUE)
+#   ) %>%
+#   pivot_mean_and_sd_longer()
 # todo add sd by participant and sd by passage INTO THIS DF
 
+# todo rewrite w/o sd as column
 long_data_by_passage <-
   preprocessed_data %>%
   reframe(
@@ -269,6 +177,7 @@ long_data_by_passage <-
     .by = passage
   ) %>% pivot_mean_and_sd_longer()
 
+# todo rewrite w/o sd as column
 long_data_by_participant <- # does sd mean anything meaningful here??
   preprocessed_data %>%
   reframe(
@@ -361,12 +270,6 @@ rates_by_participant_and_condition <- preprocessed_data_by_condition %>%
                    .names = "{.col}_rate")) %>%
   select(social, participant_id, ends_with("_rate"))
 
-# sd
-# rates_by_participant_and_condition %>%
-#   summarize(across(ends_with("_rate"),
-#                    \(x) sd(x, na.rm = TRUE),
-#                    .names = "{.col}_sd"))
-
 rates_by_passage_and_condition <- preprocessed_data_by_condition %>%
   group_by(passage, social) %>%
   summarize(across(misproduction:correction,
@@ -375,8 +278,3 @@ rates_by_passage_and_condition <- preprocessed_data_by_condition %>%
   select(social, passage, ends_with("_rate"))
 
 
-# sd
-# rates_by_passage_and_condition %>%
-#   summarize(across(ends_with("_rate"),
-#                    \(x) sd(x, na.rm = TRUE),
-#                    .names = "{.col}_sd"))
