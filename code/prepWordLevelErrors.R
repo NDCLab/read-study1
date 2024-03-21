@@ -99,7 +99,7 @@ percentize_multiple <- function(df, cols) {
   cols <- df %>% select({{cols}}) %>% colnames
   percents <-
     df %>%
-    select(cols) %>%
+    select(all_of(cols)) %>%
     map_df(percentize) %>%
     setNames(cols %>% paste0("_percent"))
 
@@ -184,19 +184,21 @@ rates_long_with_percents %>%
 # todo add sd by participant and sd by passage INTO THIS DF
 
 # todo rewrite w/o sd as column
-long_data_by_passage <-
-  preprocessed_data %>%
-  reframe(
-    across(misproduction:correction, mean_and_sd, .unpack = TRUE),
-    .by = passage
-  ) %>% pivot_mean_and_sd_longer()
+long_data_by_passage <- # "long" is todo
+#   preprocessed_data %>%
+#   reframe(
+#     across(misproduction:correction, mean_and_sd, .unpack = TRUE),
+#     .by = passage
+#   ) %>% pivot_mean_and_sd_longer()
 
 preprocessed_data %>%
   reframe(
     across(misproduction:correction,  # compute the mean for each error type
            \(.) mean(., na.rm = TRUE)),
     .by = passage) %>%
-  pivot_longer(names_to = "error_type",
+  percentize_multiple(where(is.numeric))
+
+  pivot_longer(names_to = "error_type", #fixme
                values_to = "rate_of_error_type",
                cols = everything())
 
