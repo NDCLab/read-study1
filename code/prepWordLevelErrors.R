@@ -95,6 +95,20 @@ percentize <- function(rate) {
   sprintf("%s%%", round(rate * 100, digits = 2))
 }
 
+percentize_multiple <- function(df, cols) {
+  cols <- df %>% select({{cols}}) %>% colnames
+  percents <-
+    df %>%
+    select(cols) %>%
+    map_df(percentize) %>%
+    setNames(cols %>% paste0("_percent"))
+
+  df %>%
+    mutate(
+      percents
+    )
+}
+
 # pivot_mean_and_sd_longer <- function(df, .to_percent = TRUE) {
 #   result <-
 #     df %>%
@@ -176,6 +190,15 @@ long_data_by_passage <-
     across(misproduction:correction, mean_and_sd, .unpack = TRUE),
     .by = passage
   ) %>% pivot_mean_and_sd_longer()
+
+preprocessed_data %>%
+  reframe(
+    across(misproduction:correction,  # compute the mean for each error type
+           \(.) mean(., na.rm = TRUE)),
+    .by = passage) %>%
+  pivot_longer(names_to = "error_type",
+               values_to = "rate_of_error_type",
+               cols = everything())
 
 # todo rewrite w/o sd as column
 long_data_by_participant <- # does sd mean anything meaningful here??
