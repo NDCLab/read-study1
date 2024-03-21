@@ -139,21 +139,17 @@ error_rates <- preprocessed_data %>%
 view_if(error_rates)
 
 mean_and_sd <- function(x) {
+# this is fundamentally flawed: it's not how standard deviations should be used
+# .........right??
   data.frame(rate = mean(x, na.rm = TRUE),
              sd   = sd(x, na.rm = TRUE))
 }
 
 # BINGO
-preprocessed_data %>%
-  reframe(
-    across(misproduction:correction, mean_and_sd, .unpack = TRUE)
-  ) %>%
-  pivot_longer(
-    names_to = c("error_type", ".value"),
-    names_pattern = "(.*)_(sd|rate)",
-    cols = c(ends_with("_sd"), ends_with("_rate"))
-  )
-view_last_if()
+
+percentize <- function(rate) {
+  sprintf("%s%%", round(rate * 100, digits = 2))
+}
 
 pivot_mean_and_sd_longer <- function(df, .to_percent = TRUE) {
   result <-
@@ -170,6 +166,68 @@ pivot_mean_and_sd_longer <- function(df, .to_percent = TRUE) {
     result
   }
 }
+
+rates_long <-
+  preprocessed_data %>%
+  reframe(
+    across(misproduction:correction,  # compute the mean for each error type
+           \(.) mean(., na.rm = TRUE))) %>%
+  pivot_longer(names_to = "error_type",
+               values_to = "rate_of_error_type",
+               cols = everything())
+
+# as percents:
+rates_long_with_percents <-
+  rates_long %>%
+  mutate(rate_as_percent = percentize(rate_of_error_type))
+
+# add sd as last row
+append_sd_as_last_row <- function(df, cols_to_sd, id_col = NULL) {
+  cols <- df %>% select({{cols_to_sd}}) %>% colnames
+  id_col <- df %>% select({{id_col}}) %>% colnames %>% first
+  if(is.na(id_col) || is.null(id_col)) {
+    id_col <- # first col not in passed list
+      df %>%
+      colnames %>%
+      discard(\(colname) colname %in% cols) %>%
+      first
+  }
+
+  # cols is a tidyselection
+  compute_sd_if_in_cols_else_na <- function(col) {
+    if (col %in% cols) {
+      df %>% pull(col) %>% sd(na.rm = TRUE)
+    } else if (col == id_col) {
+      "sd"
+    } else {
+      NA
+    }
+  }
+  sd_row <-
+    colnames(df) %>%
+    map(compute_sd_if_in_cols_else_na) %>%
+    data.frame %>%
+    setNames(colnames(df))
+
+  add_row(df, sd_row)
+}
+
+preprocessed_data %>%
+  reframe(
+    across(misproduction:correction, mean_and_sd, .unpack = TRUE)
+  ) %>%
+  pivot_longer(
+    names_to = c("error_type", ".value"),
+    names_pattern = "(.*)_(sd|rate)",
+    cols = c(ends_with("_sd"), ends_with("_rate"))
+  )
+view_last_if()
+
+
+rates_long %>%
+  mutate(rate_as_percent = percentize(rate_of_error_type)) %>%
+  append_sd_as_last_row(rate_of_error_type)
+
 
 # preprocessed_data %>%
 #   reframe(across(misproduction:correction,
@@ -196,6 +254,13 @@ pivot_mean_and_sd_longer <- function(df, .to_percent = TRUE) {
 #                    \(x) sd(x, na.rm = TRUE),
 #                    .names = "{.col}_rate")) %>%
 #   select(ends_with("_rate"))
+long_data <-
+  preprocessed_data %>%
+  reframe(
+    across(misproduction:correction, mean_and_sd, .unpack = TRUE)
+  ) %>%
+  pivot_mean_and_sd_longer()
+# todo add sd by participant and sd by passage INTO THIS DF
 
 long_data_by_passage <-
   preprocessed_data %>%
