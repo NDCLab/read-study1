@@ -11,6 +11,7 @@ library(glue)
 library(dplyr)
 library(rlang)
 library(tidyr)
+library(data.table)
 
 # flag: do we want to stop at each stop and view?
 VIEW_MODE=FALSE
@@ -174,35 +175,22 @@ append_sd_as_last_row <- function(df, cols_to_sd, id_col = NULL) {
 rates_long_with_percents %>%
   append_sd_as_last_row(rate_of_error_type)
 
-# todo rewrite w/o sd as column
-# long_data <-
-#   preprocessed_data %>%
-#   reframe(
-#     across(misproduction:correction, mean_and_sd, .unpack = TRUE)
-#   ) %>%
-#   pivot_mean_and_sd_longer()
-# todo add sd by participant and sd by passage INTO THIS DF
 
-# todo rewrite w/o sd as column
-long_data_by_passage <- # "long" is todo
-#   preprocessed_data %>%
-#   reframe(
-#     across(misproduction:correction, mean_and_sd, .unpack = TRUE),
-#     .by = passage
-#   ) %>% pivot_mean_and_sd_longer()
-
-preprocessed_data %>%
+long_data_by_passage <-
+  preprocessed_data %>%
   reframe(
     across(misproduction:correction,  # compute the mean for each error type
            \(.) mean(., na.rm = TRUE)),
     .by = passage) %>%
-  percentize_multiple(where(is.numeric))
+  percentize_multiple(where(is.numeric)) %>%
+  select(-where(is.numeric), where(is.numeric)) %>% # %s first for readability
+  transpose(keep.names = "error_type", make.names = "passage")
 
-  pivot_longer(names_to = "error_type", #fixme
-               values_to = "rate_of_error_type",
-               cols = everything())
 
-# todo rewrite w/o sd as column
+# %>% append_sd_as_last_row(where(is.numeric))#
+
+
+# todo rewrite w/o sd as column, per above
 long_data_by_participant <- # does sd mean anything meaningful here??
   preprocessed_data %>%
   reframe(
