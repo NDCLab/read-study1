@@ -231,7 +231,7 @@ preprocessed_data_by_condition <- preprocessed_data_with_pan_error_col %>%
   ) %>% select(colnames(preprocessed_data_with_pan_error_col), social)
 
 
-# rates of each error type by condition- fixme per above
+# rates of each error type by condition
 long_data_by_condition <- preprocessed_data_by_condition %>%
   reframe(
     across(misproduction:correction|any_error:any_error_except_omission,
@@ -243,21 +243,39 @@ long_data_by_condition <- preprocessed_data_by_condition %>%
   transpose(keep.names = "error_type", make.names = "social") %>%
   as_tibble() # for printing/dev/interactive (this is what it was pre transpose)
 
-# todo
-rates_by_participant_and_condition <- preprocessed_data_by_condition %>%
-  group_by(participant_id, social) %>%
-  summarize(across(misproduction:correction,
-                   \(x) length(which(x)) / n(),
-                   .names = "{.col}_rate")) %>%
-  select(social, participant_id, ends_with("_rate"))
+# both: 3200001_social, 3200001_alone, 3200002_social, 3200002_alone, ...
+rates_by_participant_and_condition <-
+  preprocessed_data_by_condition %>%
+  reframe(
+    across(misproduction:correction|any_error:any_error_except_omission,
+           \(.) mean(., na.rm = TRUE)),
+    .by = c(participant_id, social)
+  ) %>%
+  percentize_multiple(c(where(is.numeric), -participant_id)) %>% # include as %s
+  mutate(across(c(participant_id), as.character)) %>%
+# append_sd_as_last_row(c(where(is.numeric))) %>% # get our sd
+  select(-where(is.numeric), where(is.numeric)) %>% # %s first, for readability
+  mutate(id = paste0(participant_id, '_', ifelse(social, "social", "alone"))) %>%
+  arrange(participant_id, social) %>%
+  transpose(keep.names = "error_type", make.names = "id") %>%
+  as_tibble()
 
-# todo
-rates_by_passage_and_condition <- preprocessed_data_by_condition %>%
-  group_by(passage, social) %>%
-  summarize(across(misproduction:correction,
-                   \(x) length(which(x)) / n(),
-                   .names = "{.col}_rate")) %>%
-  select(social, passage, ends_with("_rate"))
+
+# both: boots_11g_social, boots_11g_alone, oak_9g_social, oak_9g_alone, ...
+rates_by_passage_and_condition <-
+  preprocessed_data_by_condition %>%
+  reframe(
+    across(misproduction:correction|any_error:any_error_except_omission,
+           \(.) mean(., na.rm = TRUE)),
+    .by = c(passage, social)
+  ) %>%
+  percentize_multiple(c(where(is.numeric))) %>% # include as %s
+  # append_sd_as_last_row(c(where(is.numeric))) %>% # get our sd
+  select(-where(is.numeric), where(is.numeric)) %>% # %s first, for readability %>%
+  mutate(id = paste0(passage, '_', ifelse(social, "social", "alone"))) %>%
+  arrange(passage, social) %>%
+  transpose(keep.names = "error_type", make.names = "id") %>%
+  as_tibble()
 
 # Now, generate externally accessible results (writing to filesystem)
 results_and_nicknames <- # for both CSV and sheet outputs
@@ -265,9 +283,9 @@ results_and_nicknames <- # for both CSV and sheet outputs
     total = rates_long_with_percents,
     by_participant = long_data_by_participant,
     by_passage = long_data_by_passage,
-    by_condition = long_data_by_condition #,
-    #by_participant_and_condition = "todo",
-    #by_passage_and_condition = "todo"
+    by_condition = long_data_by_condition,
+    by_participant_and_condition = rates_by_participant_and_condition,
+    by_passage_and_condition = rates_by_passage_and_condition
   )
 
 timestamp <- now("America/New_York") %>% format("%Y%m%d_%I%M%P")
