@@ -214,6 +214,7 @@ long_data_by_participant <- # rates of each error type for each person
   transpose(keep.names = "error_type", make.names = "participant_id") %>%
   as_tibble() # for printing/dev/interactive (this is what it was pre transpose)
 
+# Now, by condition
 # join participant error data and counterbalance data
 preprocessed_data_by_condition <- preprocessed_data_with_pan_error_col %>%
   left_join(counterbalance_data, by = "participant_id") %>%
@@ -226,22 +227,19 @@ preprocessed_data_by_condition <- preprocessed_data_with_pan_error_col %>%
   ) %>% select(colnames(preprocessed_data_with_pan_error_col), social)
 
 
-
 # rates of each error type by condition- fixme per above
 rates_by_condition <- preprocessed_data_by_condition %>%
-  group_by(social) %>%
-  summarize(across(misproduction:correction,
-                   \(x) length(which(x)) / n(),
-                   .names = "{.col}_rate")) %>%
-  select(social, ends_with("_rate"))
+  reframe(
+    across(misproduction:correction|any_error:any_error_except_omission,
+           \(.) mean(., na.rm = TRUE)),
+    .by = social) %>%
+  percentize_multiple(where(is.numeric)) %>% # include as %s
+  append_sd_as_last_row(where(is.numeric)) %>% # get our sd
+  select(-where(is.numeric), where(is.numeric)) %>% # %s first, for readability
+  transpose(keep.names = "error_type", make.names = "social") %>%
+  as_tibble() # for printing/dev/interactive (this is what it was pre transpose)
 
-# "", sd
-preprocessed_data_by_condition %>% # nb not working as intended: NAs still here
-  group_by(social) %>%
-  summarize(across(misproduction:correction,
-                   \(x) sd(length(which(x)) / n(), na.rm = TRUE),
-                   .names = "{.col}_sd"))
-
+# todo
 rates_by_participant_and_condition <- preprocessed_data_by_condition %>%
   group_by(participant_id, social) %>%
   summarize(across(misproduction:correction,
@@ -249,6 +247,7 @@ rates_by_participant_and_condition <- preprocessed_data_by_condition %>%
                    .names = "{.col}_rate")) %>%
   select(social, participant_id, ends_with("_rate"))
 
+# todo
 rates_by_passage_and_condition <- preprocessed_data_by_condition %>%
   group_by(passage, social) %>%
   summarize(across(misproduction:correction,
@@ -257,3 +256,4 @@ rates_by_passage_and_condition <- preprocessed_data_by_condition %>%
   select(social, passage, ends_with("_rate"))
 
 
+# todo write to csv
