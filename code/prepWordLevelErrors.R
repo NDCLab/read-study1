@@ -43,6 +43,14 @@ preprocessed_data <-
 # catch `any_upcoming_misproduced_syllable`, `any_prior_misproduced_syllable`,
 # `hesitation_with_any_prior_misproduced_syllable`, etc
 
+preprocessed_data_with_pan_error_col <- # fix NAs, then get union of core errors
+  preprocessed_data %>%
+  mutate(across(misproduction:missing_prosodic_break, replace_na, FALSE)) %>%
+  rowwise %>%
+  mutate(any_error = any(c_across(misproduction:missing_prosodic_break))) %>%
+  ungroup
+
+
 counterbalance_info <- data.frame(
   participant_id = c(3200002, 3200001, 3200004, 3200007, 3200010, 3200011,
                      3200005, 3200003, 3200006, 3200008, 3200009),
@@ -89,9 +97,6 @@ view_if(counterbalance_data)
 
 # first, grand total
 
-
-# BINGO
-
 percentize <- function(rate) {
   sprintf("%s%%", round(rate * 100, digits = 2))
 }
@@ -110,31 +115,14 @@ percentize_multiple <- function(df, cols) {
     )
 }
 
-# pivot_mean_and_sd_longer <- function(df, .to_percent = TRUE) {
-#   result <-
-#     df %>%
-#     pivot_longer(
-#       names_to = c("error_type", ".value"),
-#       names_pattern = "(.*)_(sd|rate)",
-#       cols = c(ends_with("_sd"), ends_with("_rate"))
-#     )
-#
-#   if (.to_percent) {
-#     mutate(result, rate = sprintf("%s%%", round(rate * 100, digits = 2)))
-#   } else {
-#     result
-#   }
-# }
-
 rates_long <-
-  preprocessed_data %>%
+  preprocessed_data_with_pan_error_col %>%
   reframe(
-    across(misproduction:correction,  # compute the mean for each error type
+    across(misproduction:correction|any_error,  # compute mean by error type
            \(.) mean(., na.rm = TRUE))) %>%
   pivot_longer(names_to = "error_type",
                values_to = "rate_of_error_type",
                cols = everything())
-# but how do we do this with a grouping variable?
 
 # as percents:
 rates_long_with_percents <-
@@ -144,13 +132,15 @@ rates_long_with_percents <-
 # add sd as last row
 append_sd_as_last_row <- function(df, cols_to_sd, id_col = NULL) {
   cols <- df %>% select({{cols_to_sd}}) %>% colnames
-  id_col <- df %>% select({{id_col}}) %>% colnames %>% first
+
   if(is.na(id_col) || is.null(id_col)) {
-    id_col <- # first col not in passed list
+    id_col <- # set it to the first col not in passed list
       df %>%
       colnames %>%
       discard(\(colname) colname %in% cols) %>%
       first
+  } else {
+    id_col <- df %>% select({{id_col}}) %>% colnames %>% first
   }
 
   # cols is a tidyselection
@@ -186,7 +176,6 @@ long_data_by_passage <-
   select(-where(is.numeric), where(is.numeric)) %>% # %s first for readability
   transpose(keep.names = "error_type", make.names = "passage")
 
-
 # %>% append_sd_as_last_row(where(is.numeric))#
 
 
@@ -212,12 +201,6 @@ rates_by_participant <- preprocessed_data %>%
 
 
 # better:
-preprocessed_data %>%
-  reframe(
-    across(misproduction:correction, mean_and_sd, .unpack = TRUE),
-    .by = participant_id
-  )
-
 preprocessed_data %>%
   reframe(
     across(misproduction:correction, mean_and_sd, .unpack = TRUE),
