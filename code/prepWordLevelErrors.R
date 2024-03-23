@@ -5,7 +5,7 @@
 # Report on READ study 1 data by error type as a function of participant,
 # passage, and condition.
 
-# last updated 03/21/2024
+# last updated 03/23/2024
 
 library(glue)
 library(dplyr)
@@ -47,7 +47,12 @@ preprocessed_data_with_pan_error_col <- # fix NAs, then get union of core errors
   preprocessed_data %>%
   mutate(across(misproduction:missing_prosodic_break, replace_na, FALSE)) %>%
   rowwise %>%
-  mutate(any_error = any(c_across(misproduction:missing_prosodic_break))) %>%
+  mutate(
+    any_error = any(cols = c_across(misproduction:missing_prosodic_break)),
+    any_error_except_omission = # it's fine if omission is marked, but this is
+           any(                 # true exactly when non-omission error is marked
+             c_across(
+               cols = c(misproduction:missing_prosodic_break,-omission)))) %>%
   ungroup
 
 
@@ -78,6 +83,7 @@ counterbalance_info <- data.frame(
               "Y")
 )
 
+# dev utilities for interactive use
 view_if <- function(df) { if (VIEW_MODE) View(df) }
 view_last <- function() { View(.Last.value) }
 view_last_if <- function() { view_if(.Last.value) }
@@ -95,7 +101,7 @@ counterbalance_data <-
 # VIEW_MODE=FALSE
 view_if(counterbalance_data)
 
-# first, grand total
+# first, we want a grand total, collapsing across participants and passages
 
 percentize <- function(rate) {
   sprintf("%s%%", round(rate * 100, digits = 2))
@@ -115,22 +121,8 @@ percentize_multiple <- function(df, cols) {
     )
 }
 
-rates_long <-
-  preprocessed_data_with_pan_error_col %>%
-  reframe(
-    across(misproduction:correction|any_error,  # compute mean by error type
-           \(.) mean(., na.rm = TRUE))) %>%
-  pivot_longer(names_to = "error_type",
-               values_to = "rate_of_error_type",
-               cols = everything())
-
-# as percents:
-rates_long_with_percents <-
-  rates_long %>%
-  mutate(rate_as_percent = percentize(rate_of_error_type))
-
 # add sd as last row
-append_sd_as_last_row <- function(df, cols_to_sd, id_col = NULL) {
+append_sd_as_last_row <- function(df, cols_to_sd, id_col = NULL) { # todo trim
   cols <- df %>% select({{cols_to_sd}}) %>% colnames
 
   if(is.na(id_col) || is.null(id_col)) {
@@ -147,8 +139,8 @@ append_sd_as_last_row <- function(df, cols_to_sd, id_col = NULL) {
   compute_sd_if_in_cols_else_na <- function(col) {
     if (col %in% cols) {
       df %>% pull(col) %>% sd(na.rm = TRUE)
-    } else if (col == id_col) {
-      "sd"
+    } else if (col == id_col) { # cell reflects that this row is the sd row
+      "sd" # a label- other cells in this column might have "misprd", "hes", etc
     } else {
       NA
     }
@@ -162,22 +154,36 @@ append_sd_as_last_row <- function(df, cols_to_sd, id_col = NULL) {
   add_row(df, sd_row)
 }
 
-rates_long_with_percents %>%
+
+rates_long <-
+  preprocessed_data_with_pan_error_col %>%
+  reframe(
+    across(misproduction:correction|any_error,  # compute mean by error type
+           \(.) mean(., na.rm = TRUE))) %>%
+  pivot_longer(names_to = "error_type",
+               values_to = "rate_of_error_type",
+               cols = everything())
+
+# as percents:
+rates_long_with_percents <-
+  rates_long %>%
+  mutate(rate_as_percent = percentize(rate_of_error_type)) %>%
   append_sd_as_last_row(rate_of_error_type)
 
 
 long_data_by_passage <-
-  preprocessed_data %>%
+  preprocessed_data_with_pan_error_col %>%
   reframe(
-    across(misproduction:correction,  # compute the mean for each error type
+    across(misproduction:correction|any_error, # compute mean by error type
            \(.) mean(., na.rm = TRUE)),
     .by = passage) %>%
   percentize_multiple(where(is.numeric)) %>%
   select(-where(is.numeric), where(is.numeric)) %>% # %s first for readability
-  transpose(keep.names = "error_type", make.names = "passage")
+  transpose(keep.names = "error_type", make.names = "passage") %>%
+  as_tibble() # for printing/dev/interactive use
 
 # %>% append_sd_as_last_row(where(is.numeric))#
-
+# todo add
 
 # todo rewrite w/o sd as column, per above
 long_data_by_participant <- # does sd mean anything meaningful here??
@@ -188,7 +194,8 @@ long_data_by_participant <- # does sd mean anything meaningful here??
   ) %>% pivot_mean_and_sd_longer()
 
 print("Example: how many hesitations were made for each 11th grade passage?")
-long_data_by_passage %>% filter(error_type == 'hesitation' & str_detect(passage, "11"))
+long_data_by_passage %>%
+  filter(error_type == 'hesitation' & str_detect(passage, "11"))
 
 
 # rates of each error type for each person
