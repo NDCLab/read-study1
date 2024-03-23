@@ -3,7 +3,7 @@
 # Florida International University
 
 # Report on READ study 1 data by error type as a function of participant,
-# passage, and condition.
+# passage, and condition. Write results to externally readable CSVs and XLSXes.
 
 # last updated 03/23/2024
 
@@ -12,6 +12,7 @@ library(dplyr)
 library(rlang)
 library(tidyr)
 library(data.table)
+library(lubridate) # now
 
 # flag: do we want to stop at each stop and view?
 VIEW_MODE=FALSE
@@ -19,6 +20,9 @@ VIEW_MODE=FALSE
 # this script does not need to be general to the extent that genScaffolds and
 # preproc do
 path_to_read_dataset <- ('../read-study1-dataset')
+path_to_read_analysis <- ifelse(fs::is_dir('../read-study1')[[1]],
+                                '../read-study1', '../read-study1-analysis')
+path_to_derivatives <- paste(path_to_read_analysis, 'derivatives', sep = '/')
 
 column_name_replacements <-
   c("misproduced_syllable" = "misproduction",
@@ -228,7 +232,7 @@ preprocessed_data_by_condition <- preprocessed_data_with_pan_error_col %>%
 
 
 # rates of each error type by condition- fixme per above
-rates_by_condition <- preprocessed_data_by_condition %>%
+long_data_by_condition <- preprocessed_data_by_condition %>%
   reframe(
     across(misproduction:correction|any_error:any_error_except_omission,
            \(.) mean(., na.rm = TRUE)),
@@ -255,5 +259,37 @@ rates_by_passage_and_condition <- preprocessed_data_by_condition %>%
                    .names = "{.col}_rate")) %>%
   select(social, passage, ends_with("_rate"))
 
+# Now, generate externally accessible results (writing to filesystem)
+results_and_nicknames <- # for both CSV and sheet outputs
+  list(
+    total = rates_long_with_percents,
+    by_participant = long_data_by_participant,
+    by_passage = long_data_by_passage,
+    by_condition = long_data_by_condition #,
+    #by_participant_and_condition = "todo",
+    #by_passage_and_condition = "todo"
+  )
 
-# todo write to csv
+timestamp <- now("America/New_York") %>% format("%Y%m%d_%I%M%P")
+
+# write our results to csv, xlsx
+write_to_separate_csvs <- function(path, suffix = timestamp) {
+
+  write_to_path <- function(df, nickname) {
+    outpath <- paste0(path, '/', nickname, '_', suffix, '.csv')
+    write.csv(df, file = outpath)
+  }
+
+  imap(results_and_nicknames, write_to_path)
+}
+
+write_to_xlsx_sheets <- function(path) {
+  "todo"
+}
+
+out_dir <- paste(path_to_derivatives, 'preprocessing', timestamp, sep = '/')
+fs::dir_create(out_dir)
+# fs::is_dir(out_dir)
+write_to_separate_csvs(out_dir)
+
+# todo remove row numbers
