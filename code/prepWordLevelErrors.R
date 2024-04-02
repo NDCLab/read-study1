@@ -4,13 +4,16 @@
 
 # Report on READ study 1 data by error type as a function of participant,
 # passage, and condition. Write results to externally readable CSVs and XLSXes.
+# Also track irregularities in stimuli, to monitor for potential future changes.
 
-# last updated 03/23/2024
+# last updated 04/02/2024
 
-library(glue)
+# library(glue)
 library(dplyr)
-library(rlang)
+# library(rlang)
 library(tidyr)
+library(stringr)
+library(purrr)
 library(data.table)
 library(lubridate) # now
 
@@ -23,6 +26,17 @@ path_to_read_dataset <- ('../read-study1-dataset')
 path_to_read_analysis <- ifelse(fs::is_dir('../read-study1')[[1]],
                                 '../read-study1', '../read-study1-analysis')
 path_to_derivatives <- paste(path_to_read_analysis, 'derivatives', sep = '/')
+
+# info from preproc
+path_to_stimuli <-
+  paste(path_to_read_dataset, "materials/reading-ranger/stimuli", sep = '/')
+
+path_to_resources <- paste(path_to_stimuli, 'resources', sep = '/')
+
+path_to_passage_creation_data <-
+  paste(path_to_resources, "passage-creation-order.csv", sep="/")
+
+
 
 column_name_replacements <-
   c("misproduced_syllable" = "misproduction",
@@ -86,6 +100,9 @@ counterbalance_info <- data.frame(
               "Y",
               "Y")
 )
+
+# track which was made first etc
+passage_creation_data <- read.csv(path_to_passage_creation_data)
 
 # dev utilities for interactive use
 view_if <- function(df) { if (VIEW_MODE) View(df) }
@@ -277,6 +294,75 @@ rates_by_passage_and_condition <-
   transpose(keep.names = "error_type", make.names = "id") %>%
   as_tibble()
 
+
+# Now figure out creation order: does being the first one created for a set
+# matter?
+
+# split it longer:
+# one row per passage
+# original? -> T/F
+# name
+# and then split it longer _again_
+# one row per passage per grade
+
+creation_table <-
+  passage_creation_data %>%
+  pivot_longer(cols = c(original, derivative),
+               names_to = "which_one", values_to = "passage") %>%
+  mutate(original_passage = ifelse(which_one == "original",
+                                   passage, lag(passage)),
+         is_derived = which_one == 'derivative')
+
+# - [x] Get them by grade level (one row per each)
+
+# we just want to plot them
+
+# now we want long_data_by_passage
+passage_data_wider_with_passage_name <-
+  long_data_by_passage %>%
+  transpose(keep.names = 'passage+grade',
+            make.names = 'error_type') %>%
+  mutate(passage = str_extract(`passage+grade`, '[a-z]+')) %>%
+  as_tibble()
+
+
+preprocessed_data_by_creation_order <- preprocessed_data_with_pan_error_col %>%
+  mutate(passage = str_extract(`passage`, '[a-z]+')) %>%
+  left_join(creation_table, by = "passage")
+
+long_data_by_creation_order <- preprocessed_data_by_creation_order %>%
+  reframe(
+    across(misproduction:correction|any_error:any_error_except_omission,
+           \(.) mean(., na.rm = TRUE)),
+    .by = is_derived) %>%
+  percentize_multiple(where(is.numeric)) %>% # include as %s
+  append_sd_as_last_row(where(is.numeric)) %>% # get our sd
+  select(-where(is.numeric), where(is.numeric)) %>% # %s first, for readability
+  transpose(keep.names = "error_type", make.names = "is_derived") %>%
+  as_tibble() # for printing/dev/interactive (this is what it was pre transpose)
+
+# given its name (X_11g, or X_9), i.e. `passage`, figure out is_derived
+
+# Pretty printing:
+print('Error types as percents according to passage creation order')
+long_data_by_creation_order %>%
+  filter(error_type %>% str_detect('percent')) %>%
+  select(-sd) %>%
+  rename('original_passages' = 'FALSE', 'derived_passages' = 'TRUE')
+
+long_data_by_condition <- preprocessed_data_by_condition %>%
+  reframe(
+    across(misproduction:correction|any_error:any_error_except_omission,
+           \(.) mean(., na.rm = TRUE)),
+    .by = social) %>%
+  percentize_multiple(where(is.numeric)) %>% # include as %s
+  append_sd_as_last_row(where(is.numeric)) %>% # get our sd
+  select(-where(is.numeric), where(is.numeric)) %>% # %s first, for readability
+  transpose(keep.names = "error_type", make.names = "social") %>%
+  as_tibble() # for printing/dev/interactive (this is what it was pre transpose)
+
+
+
 # Now, generate externally accessible results (writing to filesystem)
 results_and_nicknames <- # for both CSV and sheet outputs
   list(
@@ -285,7 +371,8 @@ results_and_nicknames <- # for both CSV and sheet outputs
     by_passage = long_data_by_passage,
     by_condition = long_data_by_condition,
     by_participant_and_condition = rates_by_participant_and_condition,
-    by_passage_and_condition = rates_by_passage_and_condition
+    by_passage_and_condition = rates_by_passage_and_condition,
+    by_passage_creation_order = long_data_by_creation_order
   )
 
 timestamp <- now("America/New_York") %>% format("%Y%m%d_%I%M%P")
@@ -311,3 +398,72 @@ fs::dir_create(out_dir)
 write_to_separate_csvs(out_dir)
 
 # todo remove row numbers
+
+# Now assess stimuli for outliers
+
+# figure out word frequencies: repeats of weird words
+
+all_our_words <- preprocessed_data %>%
+  select(word_clean, wordFreq, passage, word_id) %>%
+  arrange(passage) %>%
+  unique %>%
+  mutate(grade = as.numeric(str_extract(passage, '\\d+')))
+
+how_many_psgs_have_this_word <- function(word, grade_level) {
+  all_our_words %>%
+    filter(word_clean == word & grade == grade_level) %>%
+    pull(passage) %>%
+    unique %>%
+    length
+}
+
+count_11g_word <- new.env()
+count_9g_word <- new.env()
+
+memo_num_psgs_with_word <- function(word, grade_level) { # memoized
+  stopifnot(grade_level == 11 || grade_level == 9)
+  if (grade_level == 11) {
+    env <- count_11g_word
+  } else {
+    env <- count_9g_word
+  }
+  result <- env[[word]]
+
+  if(is.null(result)) {
+  # print('had to look it up')
+    result <- how_many_psgs_have_this_word(word, grade_level)
+    env[[word]] <- result
+  }
+
+  return(result)
+}
+
+
+all_our_words_with_counts <- # NB has tons of duplicates; see logic below
+  all_our_words %>%
+  rowwise() %>%
+  mutate(num_psgs_with_this_word =
+           memo_num_psgs_with_word(word_clean, grade))
+
+
+
+all_our_words_with_counts %>%
+  filter(wordFreq < quantile(all_our_words$wordFreq) %>% nth(2)
+         & num_psgs_with_this_word > 2) %>%
+  select(-word_id) %>%
+  arrange(wordFreq) %>%
+  View
+
+
+all_our_words_with_counts %>%
+  filter(wordFreq < quantile(all_our_words$wordFreq) %>% nth(2)
+         & num_psgs_with_this_word > 2) %>%
+  select(-word_id) %>%
+  arrange(wordFreq) %>%
+  select(word_clean, grade, num_psgs_with_this_word) %>%
+  unique %>%
+  arrange(desc(num_psgs_with_this_word)) %>%
+  write.csv('repeat-uncommon-words-by-grade.csv')
+
+
+
