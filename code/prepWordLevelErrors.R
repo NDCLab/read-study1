@@ -16,6 +16,7 @@ library(stringr)
 library(purrr)
 library(data.table)
 library(lubridate) # now
+library(readxl)
 
 # flag: do we want to stop at each stop and view?
 VIEW_MODE=FALSE
@@ -361,6 +362,9 @@ long_data_by_condition <- preprocessed_data_by_condition %>%
   transpose(keep.names = "error_type", make.names = "social") %>%
   as_tibble() # for printing/dev/interactive (this is what it was pre transpose)
 
+# todo revise and reimplement to include sd in a way that is meaningful for
+# creation order
+
 
 
 # Now, generate externally accessible results (writing to filesystem)
@@ -454,9 +458,26 @@ all_our_words_with_counts %>%
   arrange(wordFreq) %>%
   View
 
+criterion_frequency <-
+  all_our_words %>%
+  pull(wordFreq) %>%
+  quantile %>%
+  nth(2) # 25th percentile
+
+criterion_frequency <-
+  all_our_words %>%
+  pull(wordFreq) %>%
+  quantile(probs = 20/100) # 20th percentile
+
+criterion_unique <-
+  all_our_words %>%
+  select(word_clean, wordFreq) %>%
+  unique() %>%
+  pull(wordFreq) %>%
+  quantile(probs = 25/100)
 
 all_our_words_with_counts %>%
-  filter(wordFreq < quantile(all_our_words$wordFreq) %>% nth(2)
+  filter(wordFreq < criterion_frequency
          & num_psgs_with_this_word > 2) %>%
   select(-word_id) %>%
   arrange(wordFreq) %>%
@@ -466,4 +487,38 @@ all_our_words_with_counts %>%
   write.csv('repeat-uncommon-words-by-grade.csv')
 
 
+distribution <- ecdf(all_our_words_with_counts$wordFreq)
 
+look_up_percentile_given_frequency <- function(word_frequency) {
+  word_frequency %>%
+    distribution %>%
+    `*`(100) %>%
+    round(2) %>%
+    paste0('%')
+}
+
+all_our_words_with_counts %>%
+  filter(wordFreq < criterion_frequency
+  #     & num_psgs_with_this_word > 2) %>%
+  ) %>%
+  select(-word_id) %>%
+  arrange(wordFreq) %>%
+  select(word_clean, grade, num_psgs_with_this_word) %>%
+  unique
+
+all_our_words_with_counts %>%
+  filter(wordFreq <= criterion_frequency
+         #     & num_psgs_with_this_word > 2) %>%
+  ) %>%
+  select(-word_id) %>%
+  arrange(wordFreq) %>%
+  select(word_clean, wordFreq) %>%
+  unique %>%
+  mutate(precentile = look_up_percentile_given_frequency(wordFreq))
+
+# read in passage characteristics
+passage_metadata_path <- '../../error-coding/READ_draft-passages_metadata.xlsx'
+passage_metadata <- read_xlsx(passage_metadata_path)
+# todo clean it
+
+# drop pair == 'water bodies'
