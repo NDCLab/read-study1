@@ -6,7 +6,7 @@
 # passage, and condition. Write results to externally readable CSVs and XLSXes.
 # Also track irregularities in stimuli, to monitor for potential future changes.
 
-# last updated 04/02/2024
+# last updated 05/06/2024
 
 # library(glue)
 library(dplyr)
@@ -351,19 +351,23 @@ long_data_by_creation_order %>%
   select(-sd) %>%
   rename('original_passages' = 'FALSE', 'derived_passages' = 'TRUE')
 
-long_data_by_condition <- preprocessed_data_by_condition %>%
-  reframe(
-    across(misproduction:correction|any_error:any_error_except_omission,
-           \(.) mean(., na.rm = TRUE)),
-    .by = social) %>%
-  percentize_multiple(where(is.numeric)) %>% # include as %s
-  append_sd_as_last_row(where(is.numeric)) %>% # get our sd
-  select(-where(is.numeric), where(is.numeric)) %>% # %s first, for readability
-  transpose(keep.names = "error_type", make.names = "social") %>%
-  as_tibble() # for printing/dev/interactive (this is what it was pre transpose)
 
 # todo revise and reimplement to include sd in a way that is meaningful for
 # creation order
+
+long_data_by_passage_and_creation_order <-
+  # compute mean, i.e. rate of occurrence, by error type
+  preprocessed_data_with_pan_error_col %>%
+  reframe(
+    across(misproduction:correction|any_error:any_error_except_omission,
+           \(.) mean(., na.rm = TRUE)),
+    .by = passage) %>%
+  percentize_multiple(where(is.numeric)) %>% # include as %s, for readability
+  append_sd_as_last_row(where(is.numeric)) %>% # get our sd
+  select(-where(is.numeric), where(is.numeric)) %>% # %s first, for readability
+  transpose(keep.names = "error_type", make.names = "passage") %>%
+  as_tibble() # for printing/dev/interactive (this is what it was pre transpose)
+
 
 
 
@@ -459,32 +463,55 @@ all_our_words_with_counts %>%
   View
 
 criterion_frequency <-
-  all_our_words %>%
-  pull(wordFreq) %>%
-  quantile %>%
-  nth(2) # 25th percentile
+#   all_our_words %>%
+#   pull(wordFreq) %>%
+#   quantile %>%
+#   nth(2) # 25th percentile
+#
+# criterion_frequency <-
+#   all_our_words %>%
+#   pull(wordFreq) %>%
+#   quantile(probs = 20/100) # 20th percentile
+#
+# criterion_unique <-
+#   all_our_words %>%
+#   select(word_clean, wordFreq) %>%
+#   unique() %>%
+#   pull(wordFreq) %>%
+#   quantile(probs = 25/100)
 
-criterion_frequency <-
-  all_our_words %>%
-  pull(wordFreq) %>%
-  quantile(probs = 20/100) # 20th percentile
+# After further thought and experimentation, it was decided that an appropriate
+# log10 word frequency from SUBTLEXUS to be used as a threshold for "too rare to
+# repeat" is 2.0. It was further decided that having at most four occurrences
+# was to be allowed: it would be reasonable for a given rare word to occur in
+# two topics out of nine, and to occur in each text for the topic. (For example,
+# "fruits" might naturally occur in the savannah animals pair and in the berries
+# pair, and reasonably then crop up in both "raspberries" and "blueberries" and
+# in both "giraffes" and "elephants".)
 
-criterion_unique <-
-  all_our_words %>%
-  select(word_clean, wordFreq) %>%
-  unique() %>%
-  pull(wordFreq) %>%
-  quantile(probs = 25/100)
+# In other words, all words occurring in five or more passages within a given
+# grade level whose "Lg10WF" value in the SUBTLEXUS data fell below 2.0 were
+# chosen to be designated as problematic.
+
+criterion_frequency <- 2.0
 
 all_our_words_with_counts %>%
   filter(wordFreq < criterion_frequency
-         & num_psgs_with_this_word > 2) %>%
+         & num_psgs_with_this_word >= 5) %>%
   select(-word_id) %>%
-  arrange(wordFreq) %>%
-  select(word_clean, grade, num_psgs_with_this_word) %>%
-  unique %>%
-  arrange(desc(num_psgs_with_this_word)) %>%
+  arrange(desc(grade), desc(num_psgs_with_this_word)) %>%
   write.csv('repeat-uncommon-words-by-grade.csv')
+
+
+# all_our_words_with_counts %>%
+#   filter(wordFreq < criterion_frequency
+#          & num_psgs_with_this_word >= 5) %>%
+#   select(-word_id) %>%
+#   arrange(wordFreq) %>%
+#   select(word_clean, grade, num_psgs_with_this_word) %>%
+#   unique %>%
+#   arrange(desc(num_psgs_with_this_word)) %>%
+#   write.csv('repeat-uncommon-words-by-grade.csv')
 
 
 distribution <- ecdf(all_our_words_with_counts$wordFreq)
